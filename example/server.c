@@ -431,6 +431,8 @@ static void add_to_fdset(int fd, fd_set *fdset, int *maxfd) {
 }
 
 static bool tick(int timeout_ms) {
+	drop_bads();
+
 	bool raft_ready = false;
 
 	fd_set readfds;
@@ -498,8 +500,6 @@ static bool tick(int timeout_ms) {
 		}
 		c++;
 	}
-
-	drop_bads();
 
 	return raft_ready;
 }
