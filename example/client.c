@@ -208,8 +208,12 @@ success:
 
 
 static void wait_ms(int ms) {
-	struct timespec ts = {0, ms * 1000000};
-	nanosleep(&ts, NULL);
+	struct timespec ts = {ms / 1000, (ms % 1000) * 1000000};
+	struct timespec rem;
+	while (nanosleep(&ts, &rem) == -1) {
+		if (errno != EINTR) break;
+		ts = rem;
+	}
 }
 
 static int get_connection(timeout_t *timeout) {
