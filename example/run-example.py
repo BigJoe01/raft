@@ -1,5 +1,6 @@
 #!/usr/bin/python3
 
+import time
 import wtfexpect
 
 try:
@@ -22,6 +23,7 @@ try:
 			])
 
 		for c in clients:
+			time.sleep(0.333)
 			we.spawn(c, ['bin/client', '-k', c, *cfg])
 
 		while we.alive():
