@@ -349,11 +349,11 @@ static void on_message_from(Client *c) {
 		raft_update_t update = {strlen(buf), buf, NULL};
 		index = raft_emit(raft, update); /* raft will copy the data */
 		if (index < 0) {
-			c->expect = index;
-			c->state = CLIENT_WAITING;
-		} else {
 			shout("failed to emit a raft update\n");
 			c->state = CLIENT_SICK;
+		} else {
+			c->expect = index;
+			c->state = CLIENT_WAITING;
 		}
 	} else if (c->msg.meaning == MEAN_GET) {
 		json_t *jval = json_object_get(state, c->msg.key.data);
