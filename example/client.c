@@ -313,21 +313,25 @@ static bool set(char *key, char *value, int timeout_ms) {
 
 static void usage(char *prog) {
 	printf(
-		"Usage: %s -r ID:HOST:PORT [-r ID:HOST:PORT ...]\n",
+		"Usage: %s -k KEY -r ID:HOST:PORT [-r ID:HOST:PORT ...]\n",
 		prog
 	);
 }
 
+char *key;
 bool setup(int argc, char **argv) {
 	servernum = 0;
 	int opt;
-	while ((opt = getopt(argc, argv, "hr:")) != -1) {
+	while ((opt = getopt(argc, argv, "hk:r:")) != -1) {
 		int id;
 		char *host;
 		char *str;
 		int port;
 
 		switch (opt) {
+			case 'k':
+				key = optarg;
+				break;
 			case 'r':
 				str = strtok(optarg, ":");
 				if (!str) return false;
@@ -362,12 +366,17 @@ int main(int argc, char **argv) {
 		return EXIT_FAILURE;
 	}
 
+	srand(getpid());
+
 	while (true) {
+		char value[20];
+		snprintf(value, sizeof(value), "%d", rand());
+
 		wait_ms(1000);
-		set("hello", "world", 1000);
-		char *reply = get("hello", 1000);
+		set(key, value, 1000);
+		char *reply = get(key, 1000);
 		if (reply) {
-			shout("hello = %s\n", reply);
+			shout("%s = %s\n", key, reply);
 			free(reply);
 		}
 	}
