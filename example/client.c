@@ -369,15 +369,19 @@ int main(int argc, char **argv) {
 	srand(getpid());
 
 	while (true) {
-		char value[20];
-		snprintf(value, sizeof(value), "%d", rand());
 
 		wait_ms(1000);
-		set(key, value, 1000);
-		char *reply = get(key, 1000);
-		if (reply) {
-			shout("%s = %s\n", key, reply);
-			free(reply);
+		char value[20];
+		snprintf(value, sizeof(value), "%d", rand());
+		shout("set(%s, %s)\n", key, value);
+		if (set(key, value, 1000)) {
+			char *reply = get(key, 1000);
+			if (reply) {
+				shout("%s = %s\n", key, reply);
+				free(reply);
+			}
+		} else {
+			shout("set() failed\n");
 		}
 	}
 
