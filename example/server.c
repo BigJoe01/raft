@@ -458,12 +458,19 @@ static bool tick(int timeout_ms) {
 		}
 	}
 
-	struct timeval timeout = ms2tv(timeout_ms);
-	int numready = select(maxfd + 1, &readfds, &writefds, NULL, &timeout);
-	if (numready == -1) {
-		if (errno != EINTR) {
-			shout("failed to select: %s\n", strerror(errno));
+	int numready = 0;
+	mstimer_t timer;
+	mstimer_reset(&timer);
+	while (timeout_ms > 0) {
+		struct timeval timeout = ms2tv(timeout_ms);
+		numready = select(maxfd + 1, &readfds, &writefds, NULL, &timeout);
+		timeout_ms -= mstimer_reset(&timer);
+		if (numready >= 0) break;
+		if (errno == EINTR) {
+			shout("EINTR during select\n");
+			continue;
 		}
+		shout("failed to select: %s\n", strerror(errno));
 		return false;
 	}
 
@@ -500,6 +507,7 @@ static bool tick(int timeout_ms) {
 		}
 		c++;
 	}
+	assert(numready == 0);
 
 	return raft_ready;
 }
