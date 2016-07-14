@@ -16,15 +16,14 @@ try:
 			cfg.append("%d:%s:%d" % (i, "127.0.0.1", baseport + i))
 
 		for i, s in enumerate(servers):
-			we.spawn(s, [
-				'bin/server',
+			we.spawn(s, 'bin/server',
 				'-i', str(i),
 				*cfg,
-			])
+			)
 
 		for c in clients:
 			time.sleep(0.333)
-			we.spawn(c, ['bin/client', '-k', c, *cfg])
+			we.spawn(c, 'bin/client', '-k', c, *cfg)
 
 		while we.alive():
 			timeout = 0.5

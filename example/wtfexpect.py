@@ -4,12 +4,47 @@ import select
 import subprocess
 import time
 
+class Proc():
+	def __init__(self, name, *argv):
+		self.p = subprocess.Popen(
+			argv, bufsize=0,
+			stdin=subprocess.PIPE,
+			stdout=subprocess.PIPE,
+			stderr=subprocess.STDOUT,
+		)
+		self.name = name
+		self.accum = bytes()
+
+	def fileno(self):
+		return self.p.stdout.fileno()
+
+	def readlines(self):
+		newbytes = self.p.stdout.read(1024)
+		if len(newbytes):
+			self.accum += newbytes
+			*newlines, self.accum = self.accum.split(b'\n')
+			return [l.decode() for l in newlines]
+		else:
+			self.p.stdout.close()
+			if len(self.accum):
+				return [self.accum.decode(), None]
+			else:
+				return []
+
+	def eof(self):
+		return self.p.stdout.closed
+
+	def kill(self):
+		self.p.kill()
+
+	def wait(self):
+		self.p.wait()
+
 class WtfExpect():
 	def __init__(self):
-		self.procs = []
-		self.stdouts = {}
-		self.names = {}
+		self.procs = {}
 		self.retcodes = {}
+		self.lines = []
 
 	def __enter__(self):
 		return self
@@ -26,51 +61,34 @@ class WtfExpect():
 		)
 		return p.returncode, p.stdout
 
-	def spawn(self, name, argv):
-		p = subprocess.Popen(
-			argv, bufsize=1,
-			stdin=subprocess.PIPE,
-			stdout=subprocess.PIPE,
-			stderr=subprocess.STDOUT,
-		)
-		self.procs.append(p)
-		self.stdouts[p.stdout] = p
-		self.names[p] = name
-		return p
-
-	def getproc(self, name):
-		for p, n in self.names.items():
-			if n == name:
-				return p
-		return None
+	def spawn(self, name, *argv):
+		assert(name not in self.procs)
+		self.procs[name] = Proc(name, *argv)
+		return True
 
 	def kill(self, name):
-		proc = self.getproc(name)
-		proc.kill()
+		assert(name in self.procs)
+		self.procs[name].kill()
 
-	def close(self, proc):
-		assert(proc in self.procs)
-		name = self.names[proc]
+	def close(self, name):
+		assert(name in self.procs)
 		self.retcodes[name] = proc.wait()
-		self.procs.remove(proc)
-		del self.stdouts[proc.stdout]
-		del self.names[proc]
+		del self.procs[name]
 
 	def readline(self, timeout=None):
-		rlist = self.stdouts.keys()
-		ready, _, _ = select.select(rlist, [], [], timeout)
-		if len(ready) > 0:
-			r = ready[0]
-			proc = self.stdouts[r]
-			name = self.names[proc]
-			l = r.readline().decode()
-			if len(l):
-				return name, l.strip()
-			else:
-				self.close(proc)
-				return name, None
-		else:
-			return None, None
+		if len(self.lines):
+			return self.lines.pop(0)
+
+		active = [p for p in self.procs.values() if not p.eof()]
+		ready, _, _ = select.select(active, [], [], timeout)
+		if len(ready):
+			for proc in ready:
+				for line in proc.readlines():
+					self.lines.append((proc.name, line))
+			if len(self.lines):
+				return self.lines.pop(0)
+
+		return None, None
 
 	def expect(self, patterns, timeout=None):
 		started = time.time()
@@ -89,9 +107,8 @@ class WtfExpect():
 				return name, None
 			if name not in patterns:
 				continue
-			stripped = line.decode().strip()
-			if stripped in patterns[name]:
-				return name, stripped
+			if line in patterns[name]:
+				return name, line
 
 	def capture(self, *names):
 		results = {}
@@ -124,9 +141,8 @@ class WtfExpect():
 		return len(self.procs) > 0
 
 	def finish(self):
-		for proc in self.procs:
+		for proc in self.procs.values():
 			proc.kill()
-		self.procs = []
-		self.stdouts = {}
-		self.names = {}
+		self.procs = {}
 		self.retcodes = {}
+		self.lines = []
