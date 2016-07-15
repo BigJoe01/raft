@@ -3,6 +3,10 @@
 import time
 import wtfexpect
 
+GREEN = '\033[92m'
+RED = '\033[91m'
+NOCOLOR = '\033[0m'
+
 try:
 	with wtfexpect.WtfExpect() as we:
 		servers = 'alpha bravo conan'.split()
@@ -25,21 +29,27 @@ try:
 			time.sleep(0.333)
 			we.spawn(c, 'bin/client', '-k', c, *cfg)
 
+		start = time.time()
 		while we.alive():
+			if time.time() - start > 5 and we.alive('alpha'):
+				we.kill('alpha')
 			timeout = 0.5
 			name, line = we.readline(timeout)
 			if name is None: continue
 
+			if name in servers:
+				src = "%d(%s)" % (serverids[name], name)
+			else:
+				src = name
+
 			if line is None:
 				code = we.getcode(name)
-				if name in servers:
-					print("%d(%s) finished with code %d" % (serverids[name], name, code))
+				if code == 0:
+					color = GREEN
 				else:
-					print("%s finished with code %d" % (name, code))
+					color = RED
+				print("%s%s finished with code %d%s" % (color, src, code, NOCOLOR))
 			else:
-				if name in servers:
-					print("[%d(%s)] %s" % (serverids[name], name, line))
-				else:
-					print("[%s] %s" % (name, line))
+				print("[%s] %s" % (src, line))
 except KeyboardInterrupt:
 	print("killed")
