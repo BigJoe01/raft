@@ -92,7 +92,7 @@ typedef struct raft_data_t {
 
 typedef struct raft_msg_data_t {
 	int msgtype;
-	int term;
+	int curterm;
 	int from;
 	int seqno;
 } raft_msg_data_t;
@@ -105,7 +105,7 @@ typedef struct raft_msg_update_t {
 
 	bool empty;    // the message is just a heartbeat if empty
 
-	int term;
+	int entryterm;
 	int totallen;
 
 	int acked;     // the leader's acked number
@@ -117,7 +117,7 @@ typedef struct raft_msg_update_t {
 
 typedef struct raft_msg_done_t {
 	raft_msg_data_t msg;
-	int term;  // the term of the appended entry
+	int entryterm;  // the term of the appended entry
 	raft_progress_t progress; // the progress after appending
 	int applied;
 	bool success;
@@ -127,7 +127,7 @@ typedef struct raft_msg_done_t {
 typedef struct raft_msg_claim_t {
 	raft_msg_data_t msg;
 	int index; // the index of my last completely received entry
-	int term;  // the term of my last entry
+	int lastterm;  // the term of my last entry
 } raft_msg_claim_t;
 
 typedef struct raft_msg_vote_t {
@@ -473,7 +473,7 @@ static void raft_beat(raft_t r, int dst) {
 	raft_msg_update_t *m = malloc(sizeof(raft_msg_update_t) + r->config.chunk_len - 1);
 
 	m->msg.msgtype = RAFT_MSG_UPDATE;
-	m->msg.term = r->term;
+	m->msg.curterm = r->term;
 	m->msg.from = r->me;
 
 	if (p->acked.entries <= RAFT_LOG_LAST_INDEX(r)) {
@@ -500,7 +500,7 @@ static void raft_beat(raft_t r, int dst) {
 		} else {
 			m->prevterm = -1;
 		}
-		m->term = e->term;
+		m->entryterm = e->term;
 		m->totallen = e->update.len;
 		m->empty = false;
 		m->offset = p->acked.bytes;
@@ -569,14 +569,14 @@ static void raft_claim(raft_t r) {
 	raft_msg_claim_t m;
 
 	m.msg.msgtype = RAFT_MSG_CLAIM;
-	m.msg.term = r->term;
+	m.msg.curterm = r->term;
 	m.msg.from = r->me;
 
 	m.index = r->log.first + r->log.size - 1;
 	if (m.index >= 0) {
-		m.term = RAFT_LOG(r, m.index).term;
+		m.lastterm = RAFT_LOG(r, m.index).term;
 	} else {
-		m.term = -1;
+		m.lastterm = -1;
 	}
 
 	int i;
@@ -867,7 +867,7 @@ static void raft_handle_update(raft_t r, raft_msg_update_t *m) {
 
 	raft_msg_done_t reply;
 	reply.msg.msgtype = RAFT_MSG_DONE;
-	reply.msg.term = r->term;
+	reply.msg.curterm = r->term;
 	reply.msg.from = r->me;
 	reply.msg.seqno = m->msg.seqno;
 
@@ -877,15 +877,15 @@ static void raft_handle_update(raft_t r, raft_msg_update_t *m) {
 	if (!m->empty && !m->snapshot && !raft_appendable(r, m->previndex, m->prevterm)) goto finish;
 
 	if (RAFT_LOG_LAST_INDEX(r) >= 0) {
-		reply.term = RAFT_LOG(r, RAFT_LOG_LAST_INDEX(r)).term;
+		reply.entryterm = RAFT_LOG(r, RAFT_LOG_LAST_INDEX(r)).term;
 	} else {
-		reply.term = -1;
+		reply.entryterm = -1;
 	}
 	reply.success = false;
 
 	// the message is too old
-	if (m->msg.term < r->term) {
-		debug("refuse old message %d < %d\n", m->msg.term, r->term);
+	if (m->msg.curterm < r->term) {
+		debug("refuse old message %d < %d\n", m->msg.curterm, r->term);
 		goto finish;
 	}
 
@@ -908,9 +908,14 @@ static void raft_handle_update(raft_t r, raft_msg_update_t *m) {
 	}
 
 	if (!m->empty) {
-		if ((m->offset > 0) && (e->term < m->term)) {
+		shout(
+			"got a chunk: offset=%d size=%d term=%d snapshot=%s\n",
+			m->offset, m->len, m->entryterm, m->snapshot ? "true" : "false"
+		);
+
+		if ((m->offset > 0) && (e->term < m->entryterm)) {
 			shout("a chunk of newer version of entry received, resetting progress to avoid corruption\n");
-			e->term = m->term;
+			e->term = m->entryterm;
 			e->bytes = 0;
 			goto finish;
 		}
@@ -924,7 +929,7 @@ static void raft_handle_update(raft_t r, raft_msg_update_t *m) {
 		u->data = realloc(u->data, m->totallen);
 
 		memcpy(u->data + m->offset, m->data, m->len);
-		e->term = m->term;
+		e->term = m->entryterm;
 		e->bytes = m->offset + m->len;
 		assert(e->bytes <= u->len);
 
@@ -948,9 +953,9 @@ static void raft_handle_update(raft_t r, raft_msg_update_t *m) {
 	}
 
 	if (RAFT_LOG_LAST_INDEX(r) >= 0) {
-		reply.term = RAFT_LOG(r, RAFT_LOG_LAST_INDEX(r)).term;
+		reply.entryterm = RAFT_LOG(r, RAFT_LOG_LAST_INDEX(r)).term;
 	} else {
-		reply.term = -1;
+		reply.entryterm = -1;
 	}
 	reply.applied = r->log.applied;
 
@@ -978,8 +983,8 @@ static void raft_handle_done(raft_t r, raft_msg_done_t *m) {
 		return;
 	}
 	peer->seqno++;
-	if (m->msg.term < r->term) {
-		debug("[from %d] ============= msgterm(%d) != term(%d)\n", sender, m->term, r->term);
+	if (m->msg.curterm < r->term) {
+		debug("[from %d] ============= msgterm(%d) != term(%d)\n", sender, m->msg.curterm, r->term);
 		return;
 	}
 
@@ -1020,30 +1025,30 @@ void raft_ensure_term(raft_t r, int term) {
 static void raft_handle_claim(raft_t r, raft_msg_claim_t *m) {
 	int candidate = m->msg.from;
 
-	if (m->msg.term >= r->term) {
+	if (m->msg.curterm >= r->term) {
 		if (r->role != FOLLOWER) {
 			shout("There is another candidate, demoting myself\n");
 		}
-		if (m->msg.term > r->term) {
-			raft_set_term(r, m->term);
+		if (m->msg.curterm > r->term) {
+			raft_set_term(r, m->msg.curterm);
 		}
 		r->role = FOLLOWER;
 	}
 
 	raft_msg_vote_t reply;
 	reply.msg.msgtype = RAFT_MSG_VOTE;
-	reply.msg.term = r->term;
+	reply.msg.curterm = r->term;
 	reply.msg.from = r->me;
 	reply.msg.seqno = m->msg.seqno;
 
 	reply.granted = false;
 
-	if (m->msg.term < r->term) goto finish;
+	if (m->msg.curterm < r->term) goto finish;
 
 	// check if the candidate's log is up to date
 	if (m->index < r->log.first + r->log.size - 1) goto finish;
 	if (m->index == r->log.first + r->log.size - 1) {
-		if ((m->index >= 0) && (RAFT_LOG(r, m->index).term != m->term)) {
+		if ((m->index >= 0) && (RAFT_LOG(r, m->index).term != m->lastterm)) {
 			goto finish;
 		}
 	}
@@ -1054,7 +1059,7 @@ static void raft_handle_claim(raft_t r, raft_msg_claim_t *m) {
 		reply.granted = true;
 	}
 finish:
-	shout("voting %s\n", reply.granted ? "yes" : "no");
+	shout("voting %s %d\n", reply.granted ? "for" : "against", candidate);
 	raft_send(r, candidate, &reply, sizeof(reply));
 }
 
@@ -1063,7 +1068,7 @@ static void raft_handle_vote(raft_t r, raft_msg_vote_t *m) {
 	raft_peer_t *peer = r->peers + sender;
 	if (m->msg.seqno != peer->seqno) return;
 	peer->seqno++;
-	if (m->msg.term < r->term) return;
+	if (m->msg.curterm < r->term) return;
 
 	if (r->role != CANDIDATE) return;
 
@@ -1075,11 +1080,11 @@ static void raft_handle_vote(raft_t r, raft_msg_vote_t *m) {
 }
 
 void raft_handle_message(raft_t r, raft_msg_t m) {
-	if (m->term > r->term) {
+	if (m->curterm > r->term) {
 		if (r->role != FOLLOWER) {
 			shout("I have an old term, demoting myself\n");
 		}
-		raft_set_term(r, m->term);
+		raft_set_term(r, m->curterm);
 		r->role = FOLLOWER;
 	}
 
