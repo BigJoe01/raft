@@ -6,6 +6,7 @@
 #include <errno.h>
 #include <string.h>
 #include <assert.h>
+#include <signal.h>
 
 #include <poll.h>
 #include <sys/types.h>
@@ -76,21 +77,25 @@ static bool timed_write(int sock, void *data, size_t len, timeout_t *timeout) {
 	while (sent < len) {
 		int newbytes;
 		if (timeout_happened(timeout)) {
-			shout("write timed out\n");
+			debug("write timed out\n");
 			return false;
 		}
 
 		newbytes = write(sock, (char *)data + sent, len - sent);
-		if (newbytes == -1) {
-			if (errno == EAGAIN) {
-				if (poll_until_writable(sock, timeout)) {
-					continue;
-				}
-			}
-			shout("failed to write: error %d: %s\n", errno, strerror(errno));
+		if (newbytes > 0) {
+			sent += newbytes;
+		} else if (newbytes == 0) {
 			return false;
+		} else {
+			if ((errno == EAGAIN) || (errno == EWOULDBLOCK) || (errno == EINTR)) {
+				if (!poll_until_writable(sock, timeout)) {
+					return false;
+				}
+			} else {
+				debug("failed to write: error %d: %s\n", errno, strerror(errno));
+				return false;
+			}
 		}
-		sent += newbytes;
 	}
 
 	return true;
@@ -361,6 +366,8 @@ bool setup(int argc, char **argv) {
 }
 
 int main(int argc, char **argv) {
+	signal(SIGPIPE, SIG_IGN);
+
 	if (!setup(argc, argv)) {
 		usage(argv[0]);
 		return EXIT_FAILURE;
