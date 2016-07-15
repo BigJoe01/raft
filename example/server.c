@@ -315,17 +315,17 @@ static bool start_server(void) {
 }
 
 static bool accept_client(void) {
-	shout("a new connection is queued\n");
+	debug("a new connection is queued\n");
 
 	int fd = accept(server.listener, NULL, NULL);
 	if (fd == -1) {
 		shout("failed to accept a connection: %s\n", strerror(errno));
 		return false;
 	}
-	shout("a new connection fd=%d accepted\n", fd);
+	debug("a new connection fd=%d accepted\n", fd);
 	
 	if (!raft_is_leader(raft)) {
-		shout("not a leader, disconnecting the accepted connection fd=%d\n", fd);
+		debug("not a leader, disconnecting the accepted connection fd=%d\n", fd);
 		close(fd);
 		return false;
 	}
@@ -345,13 +345,14 @@ static void on_message_from(Client *c) {
 	if (c->msg.meaning == MEAN_SET) {
 		char buf[sizeof(c->msg) + 10];
 		snprintf(buf, sizeof(buf), "{\"%s\": \"%s\"}", c->msg.key.data, c->msg.value.data);
-		shout("emit update: %s\n", buf);
+		debug("emit update: %s\n", buf);
 		raft_update_t update = {strlen(buf), buf, NULL};
 		index = raft_emit(raft, update); /* raft will copy the data */
 		if (index < 0) {
 			shout("failed to emit a raft update\n");
 			c->state = CLIENT_SICK;
 		} else {
+			debug("client is waiting for %d\n", index);
 			c->expect = index;
 			c->state = CLIENT_WAITING;
 		}
@@ -467,7 +468,6 @@ static bool tick(int timeout_ms) {
 		timeout_ms -= mstimer_reset(&timer);
 		if (numready >= 0) break;
 		if (errno == EINTR) {
-			shout("EINTR during select\n");
 			continue;
 		}
 		shout("failed to select: %s\n", strerror(errno));

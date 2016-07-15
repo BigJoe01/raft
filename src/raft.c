@@ -479,6 +479,8 @@ static void raft_beat(raft_t r, int dst) {
 	if (p->acked.entries <= RAFT_LOG_LAST_INDEX(r)) {
 		int sendindex;
 
+		debug("%d has acked %d:%d\n", dst, p->acked.entries, p->acked.bytes);
+
 		if (p->acked.entries < RAFT_LOG_FIRST_INDEX(r)) {
 			// The peer has woken up from anabiosis. Send the first
 			// log entry (which is usually a snapshot).
@@ -491,6 +493,7 @@ static void raft_beat(raft_t r, int dst) {
 			sendindex = p->acked.entries;
 		}
 		m->snapshot = RAFT_LOG(r, sendindex).snapshot;
+		debug("will send index %d to %d\n", sendindex, dst);
 
 		m->previndex = sendindex - 1;
 		raft_entry_t *e = &RAFT_LOG(r, sendindex);
@@ -517,9 +520,14 @@ static void raft_beat(raft_t r, int dst) {
 
 	p->seqno++;
 	m->msg.seqno = p->seqno;
-//	if (!m->empty) {
-//		debug("[to %d] update with seqno = %d, offset = %d, previndex = %d\n", dst, m->msg.seqno, m->offset, m->previndex);
-//	}
+	if (!m->empty) {
+		debug(
+			"sending seqno=%d to %d: offset=%d size=%d total=%d term=%d snapshot=%s\n",
+			m->msg.seqno, dst, m->offset, m->len, m->totallen, m->entryterm, m->snapshot ? "true" : "false"
+		);
+	} else {
+		debug("sending seqno=%d to %d: heartbeat\n", m->msg.seqno, dst);
+	}
 
 	raft_send(r, dst, m, sizeof(raft_msg_update_t) + m->len - 1);
 	free(m);
@@ -750,12 +758,9 @@ int raft_emit(raft_t r, raft_update_t update) {
 }
 
 bool raft_applied(raft_t r, int id, int index) {
-	if (r->me == id)
-	{
+	if (r->me == id) {
 		return r->log.applied > index;
-	}
-	else
-	{
+	} else {
 		raft_peer_t *p = r->peers + id;
 		if (!p->up) return false;
 		return p->applied > index;
@@ -908,13 +913,13 @@ static void raft_handle_update(raft_t r, raft_msg_update_t *m) {
 	}
 
 	if (!m->empty) {
-		shout(
-			"got a chunk: offset=%d size=%d term=%d snapshot=%s\n",
-			m->offset, m->len, m->entryterm, m->snapshot ? "true" : "false"
+		debug(
+			"got a chunk seqno=%d from %d: offset=%d size=%d total=%d term=%d snapshot=%s\n",
+			m->msg.seqno, sender, m->offset, m->len, m->totallen, m->entryterm, m->snapshot ? "true" : "false"
 		);
 
-		if ((m->offset > 0) && (e->term < m->entryterm)) {
-			shout("a chunk of newer version of entry received, resetting progress to avoid corruption\n");
+		if ((m->offset > 0) && (e->term != m->entryterm)) {
+			shout("a chunk of another version of the entry received, resetting progress to avoid corruption\n");
 			e->term = m->entryterm;
 			e->bytes = 0;
 			goto finish;
@@ -964,6 +969,13 @@ finish:
 	reply.progress.entries = RAFT_LOG_LAST_INDEX(r) + 1;
 	reply.progress.bytes = e->bytes;
 
+	debug(
+		"replying with %s to %d, our progress is %d:%d\n",
+		reply.success ? "ok" : "reject",
+		sender,
+		reply.progress.entries,
+		reply.progress.bytes
+	);
 	raft_send(r, sender, &reply, sizeof(reply));
 }
 
@@ -1027,7 +1039,7 @@ static void raft_handle_claim(raft_t r, raft_msg_claim_t *m) {
 
 	if (m->msg.curterm >= r->term) {
 		if (r->role != FOLLOWER) {
-			shout("There is another candidate, demoting myself\n");
+			shout("there is another candidate, demoting myself\n");
 		}
 		if (m->msg.curterm > r->term) {
 			raft_set_term(r, m->msg.curterm);

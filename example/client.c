@@ -32,6 +32,8 @@
 		fflush(stderr); \
 	} while (0)
 
+#define debug(...)
+
 typedef struct HostPort {
 	bool up;
 	char host[HOST_NAME_MAX + 1];
@@ -107,7 +109,7 @@ static bool timed_read(int sock, void *data, size_t len, timeout_t *timeout) {
 	while (recved < len) {
 		int newbytes;
 		if (timeout_happened(timeout)) {
-			shout("read timed out\n");
+			debug("read timed out\n");
 			return false;
 		}
 
@@ -127,10 +129,20 @@ static bool timed_read(int sock, void *data, size_t len, timeout_t *timeout) {
 	return true;
 }
 
+static void wait_ms(int ms) {
+	struct timespec ts = {ms / 1000, (ms % 1000) * 1000000};
+	struct timespec rem;
+	while (nanosleep(&ts, &rem) == -1) {
+		if (errno != EINTR) break;
+		ts = rem;
+	}
+}
+
 static void disconnect_leader(void) {
 	if (leadersock >= 0) {
 		close(leadersock);
 	}
+	wait_ms(100);
 	select_next_server();
 	leadersock = -1;
 }
@@ -165,7 +177,7 @@ static bool connect_leader(timeout_t *timeout) {
 		return false;
 	}
 
-	shout("trying [%d] %s:%d\n", leader, leaderhp->host, leaderhp->port);
+	debug("trying [%d] %s:%d\n", leader, leaderhp->host, leaderhp->port);
 	for (a = addrs; a != NULL; a = a->ai_next) {
 		int one = 1;
 
@@ -192,7 +204,7 @@ static bool connect_leader(timeout_t *timeout) {
 			}
 			else
 			{
-				shout("failed to connect to an address: %s\n", strerror(errno));
+				debug("failed to connect to an address: %s\n", strerror(errno));
 				close(sd);
 				continue;
 			}
@@ -203,7 +215,7 @@ static bool connect_leader(timeout_t *timeout) {
 failure:
 	freeaddrinfo(addrs);
 	disconnect_leader();
-	shout("could not connect\n");
+	debug("could not connect\n");
 	return false;
 success:
 	freeaddrinfo(addrs);
@@ -211,21 +223,10 @@ success:
 	return true;
 }
 
-
-static void wait_ms(int ms) {
-	struct timespec ts = {ms / 1000, (ms % 1000) * 1000000};
-	struct timespec rem;
-	while (nanosleep(&ts, &rem) == -1) {
-		if (errno != EINTR) break;
-		ts = rem;
-	}
-}
-
 static int get_connection(timeout_t *timeout) {
 	if (leadersock < 0) {
 		if (connect_leader(timeout)) return leadersock;
-		shout("update: connect_leader() failed\n");
-		wait_ms(100);
+		debug("update: connect_leader() failed\n");
 	}
 	return leadersock;
 }
@@ -235,17 +236,17 @@ static bool try_query(Message *msg, Message *answer, timeout_t *timeout) {
 	if (s < 0) return false;
 
 	if (timeout_happened(timeout)) {
-		shout("try_query: get_connection() timed out\n");
+		debug("try_query: get_connection() timed out\n");
 		return false;
 	}
 
 	if (!timed_write(s, msg, sizeof(Message), timeout)) {
-		shout("try_query: failed to send the query to the leader\n");
+		debug("try_query: failed to send the query to the leader\n");
 		return false;
 	}
 
 	if (!timed_read(s, answer, sizeof(Message), timeout)) {
-		shout("try_query: failed to recv the answer from the leader\n");
+		debug("try_query: failed to recv the answer from the leader\n");
 		return false;
 	}
 
