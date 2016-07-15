@@ -29,7 +29,7 @@ class Proc():
 			if len(self.accum):
 				return [self.accum.decode(), None]
 			else:
-				return []
+				return [None]
 
 	def eof(self):
 		return self.p.stdout.closed
@@ -38,7 +38,7 @@ class Proc():
 		self.p.kill()
 
 	def wait(self):
-		self.p.wait()
+		return self.p.wait()
 
 class WtfExpect():
 	def __init__(self):
@@ -72,7 +72,7 @@ class WtfExpect():
 
 	def close(self, name):
 		assert(name in self.procs)
-		self.retcodes[name] = proc.wait()
+		self.retcodes[name] = self.procs[name].wait()
 		del self.procs[name]
 
 	def readline(self, timeout=None):
@@ -85,6 +85,9 @@ class WtfExpect():
 			for proc in ready:
 				for line in proc.readlines():
 					self.lines.append((proc.name, line))
+					if line is None:
+						self.kill(proc.name)
+						self.close(proc.name)
 			if len(self.lines):
 				return self.lines.pop(0)
 
@@ -137,8 +140,11 @@ class WtfExpect():
 			return retcode
 		return None
 
-	def alive(self):
-		return len(self.procs) > 0
+	def alive(self, name=None):
+		if name is not None:
+			return name in self.procs
+		else:
+			return len(self.procs) > 0
 
 	def finish(self):
 		for proc in self.procs.values():
