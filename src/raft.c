@@ -955,6 +955,7 @@ static void raft_handle_update(raft_t r, raft_msg_update_t *m) {
 		}
 	} else {
 		// just a heartbeat
+		e->bytes = 0;
 	}
 
 	if (RAFT_LOG_LAST_INDEX(r) >= 0) {
