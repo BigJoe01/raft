@@ -516,13 +516,13 @@ int main(int argc, char **argv) {
 	char *logfilename = NULL;
 	bool daemonize = false;
 
-	int myid = NOBODY;
 	int id;
 	char *host;
 	char *str;
 	int port;
 	int opt;
 
+	server.id = NOBODY;
 	server.host = NULL;
 
 	state = json_object();
@@ -544,10 +544,10 @@ int main(int argc, char **argv) {
 	while ((opt = getopt(argc, argv, "hi:r:l:")) != -1) {
 		switch (opt) {
 			case 'i':
-				myid = atoi(optarg);
+				server.id = atoi(optarg);
 				break;
 			case 'r':
-				if (myid == NOBODY) {
+				if (server.id == NOBODY) {
 					usage(argv[0]);
 					return EXIT_FAILURE;
 				}
@@ -570,11 +570,11 @@ int main(int argc, char **argv) {
 					return EXIT_FAILURE;
 				}
 
-				if (!raft_peer_up(raft, id, host, port, id == myid)) {
+				if (!raft_peer_up(raft, id, host, port, id == server.id)) {
 					usage(argv[0]);
 					return EXIT_FAILURE;
 				}
-				if (id == myid) {
+				if (id == server.id) {
 					server.host = host;
 					server.port = port;
 				}
