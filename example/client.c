@@ -114,16 +114,20 @@ static bool timed_read(int sock, void *data, size_t len, timeout_t *timeout) {
 		}
 
 		newbytes = read(sock, (char *)data + recved, len - recved);
-		if (newbytes <= 0) {
-			if (errno == EAGAIN) {
-				if (poll_until_readable(sock, timeout)) {
-					continue;
-				}
-			}
-			shout("failed to read: error %d: %s\n", errno, strerror(errno));
+		if (newbytes > 0) {
+			recved += newbytes;
+		} else if (newbytes == 0) {
 			return false;
+		} else {
+			if ((errno == EAGAIN) || (errno == EWOULDBLOCK) || (errno == EINTR)) {
+				if (!poll_until_readable(sock, timeout)) {
+					return false;
+				}
+			} else {
+				debug("failed to read: error %d: %s\n", errno, strerror(errno));
+				return false;
+			}
 		}
-		recved += newbytes;
 	}
 
 	return true;
