@@ -4,7 +4,7 @@ containers:
 
   client1:
     container_name: client1
-    image: raft 
+    image: raft
     environment:
       ROLE: 'client'
       CLIENTKEY: 'hello'
@@ -13,7 +13,7 @@ containers:
 
   client2:
     container_name: client2
-    image: raft 
+    image: raft
     environment:
       ROLE: 'client'
       CLIENTKEY: 'world'
@@ -22,28 +22,28 @@ containers:
 
   server1:
     container_name: server1
-    image: raft 
+    image: raft
     environment:
       ROLE: 'server'
-      SERVERID: 1
+      SERVERID: 10
     volumes:
       "/tmp": "/tmp"
 
   server2:
     container_name: server2
-    image: raft 
+    image: raft
     environment:
       ROLE: 'server'
-      SERVERID: 2
+      SERVERID: 20
     volumes:
       "/tmp": "/tmp"
 
   server3:
     container_name: server3
-    image: raft 
+    image: raft
     environment:
       ROLE: 'server'
-      SERVERID: 3
+      SERVERID: 30
     volumes:
       "/tmp": "/tmp"
 

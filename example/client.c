@@ -52,6 +52,7 @@ static void select_next_server(void) {
 		HostPort *hp = servers + idx;
 		if (hp->up) {
 			leader = idx;
+			shout("switched from server %d to server %d\n", orig_leader, leader);
 			return;
 		}
 	}
@@ -146,9 +147,8 @@ static void disconnect_leader(void) {
 	if (leadersock >= 0) {
 		close(leadersock);
 	}
-	wait_ms(100);
-	select_next_server();
 	leadersock = -1;
+	wait_ms(100);
 }
 
 static bool connect_leader(timeout_t *timeout) {
@@ -161,8 +161,14 @@ static bool connect_leader(timeout_t *timeout) {
 
 	HostPort *leaderhp;
 
-	if (leader == -1) select_next_server();
+	shout("leadersock is %d\n", leadersock);
+	if (leadersock < 0) select_next_server();
+	if (leader < 0) {
+		shout("will NOT try server %d\n", leader);
+		return false;
+	}
 
+	shout("will try server %d\n", leader);
 	leaderhp = servers + leader;
 
 	memset(&hint, 0, sizeof(hint));
@@ -172,16 +178,16 @@ static bool connect_leader(timeout_t *timeout) {
 	hint.ai_protocol = getprotobyname("tcp")->p_proto;
 
 	if ((rc = getaddrinfo(leaderhp->host, portstr, &hint, &addrs))) {
-		disconnect_leader();
 		shout(
 			"failed to resolve address '%s:%d': %s\n",
 			leaderhp->host, leaderhp->port,
 			gai_strerror(rc)
 		);
+		disconnect_leader();
 		return false;
 	}
 
-	debug("trying [%d] %s:%d\n", leader, leaderhp->host, leaderhp->port);
+	shout("trying [%d] %s:%d\n", leader, leaderhp->host, leaderhp->port);
 	for (a = addrs; a != NULL; a = a->ai_next) {
 		int one = 1;
 
@@ -208,7 +214,7 @@ static bool connect_leader(timeout_t *timeout) {
 			}
 			else
 			{
-				debug("failed to connect to an address: %s\n", strerror(errno));
+				shout("failed to connect to an address: %s\n", strerror(errno));
 				close(sd);
 				continue;
 			}
@@ -219,11 +225,12 @@ static bool connect_leader(timeout_t *timeout) {
 failure:
 	freeaddrinfo(addrs);
 	disconnect_leader();
-	debug("could not connect\n");
+	shout("could not connect\n");
 	return false;
 success:
 	freeaddrinfo(addrs);
 	leadersock = sd;
+	shout("connection to %d succeeded\n", leader);
 	return true;
 }
 

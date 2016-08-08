@@ -1,12 +1,11 @@
 #!/usr/bin/python3
 
-from contextlib import contextmanager
 import unittest
 import time
 import subprocess
 
 def log_to_everybody(line):
-    for name in 'client-hello client-world server-1 server-2 server-3'.split():
+    for name in 'client-hello client-world server-10 server-20 server-30'.split():
         filename = '/tmp/%s.log' % name
         with open(filename, 'a') as f:
             print(line, file=f)
@@ -34,17 +33,12 @@ def blockade_destroy():
     subprocess.check_call(['blockade','destroy'])
     log_to_everybody("=== blockade destroyed")
 
-@contextmanager
-def blockade():
-    blockade_up()
-    yield
-    blockade_destroy()
-
 class PartitionTest(unittest.TestCase):
     def test_node_partition(self):
         log_to_everybody("=== test_node_partition")
-        with blockade():
-            time.sleep(10)
+        blockade_up()
+        try:
+            time.sleep(20)
 
             for serverid in range(1,4):
                 name = "server%d" % serverid
@@ -52,6 +46,8 @@ class PartitionTest(unittest.TestCase):
                 time.sleep(10)
                 blockade_join()
                 time.sleep(10)
+        finally:
+            blockade_destroy()
 
 if __name__ == '__main__':
     unittest.main()

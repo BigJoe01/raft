@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-CFG="-r 1:server1:6000 -r 2:server2:6000 -r 3:server3:6000"
+CFG="-r 10:server1:6000 -r 20:server2:6000 -r 30:server3:6000"
 if [ "$ROLE" = 'client' ]; then
 	sleep 15
 	exec bin/client -k $CLIENTKEY $CFG 2>> /tmp/client-$CLIENTKEY.log
