@@ -1,5 +1,5 @@
 #override CC := clang
-override CFLAGS += -fpic -Wall -Wfatal-errors -O0 -g -pedantic -std=c99 -D_POSIX_C_SOURCE=200112L -D_BSD_SOURCE
+override CFLAGS += -fpic -Wall -Wfatal-errors -O0 -g -pedantic -std=c99 -D_POSIX_C_SOURCE=200809L -D_BSD_SOURCE
 override CPPFLAGS += -I. -Iinclude #-DDEBUG
 override SERVER_LDFLAGS += -Llib -lraft -ljansson
 
