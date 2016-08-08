@@ -48,7 +48,7 @@ HostPort servers[MAX_SERVERS];
 static void select_next_server(void) {
 	int orig_leader = leader;
 	for (int i = 0; i < MAX_SERVERS; i++) {
-		int idx = (orig_leader + i + 1) % servernum;
+		int idx = (orig_leader + i + 1) % MAX_SERVERS;
 		HostPort *hp = servers + idx;
 		if (hp->up) {
 			leader = idx;
