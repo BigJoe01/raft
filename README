@@ -10,6 +10,13 @@ Features
 + Log Replication
 + Log Compaction
 
+Testing
+-------
+
+1. Install docker and blockade.
+1. You may want to gain superuser privileges at this point.
+1. ``make check``
+
 TODO
 ----
 

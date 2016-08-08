@@ -382,7 +382,7 @@ int main(int argc, char **argv) {
 
 	while (true) {
 
-		wait_ms(1000);
+		//wait_ms(1000);
 		char value[20];
 		snprintf(value, sizeof(value), "%d", rand());
 		shout("set(%s, %s)\n", key, value);

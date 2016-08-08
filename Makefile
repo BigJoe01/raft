@@ -38,3 +38,7 @@ libdir:
 
 clean:
 	rm -rfv bin obj lib
+
+check:
+	docker build -t raft .
+	cd tests && ./test.py

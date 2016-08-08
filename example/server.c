@@ -507,7 +507,6 @@ static bool tick(int timeout_ms) {
 		}
 		c++;
 	}
-	assert(numready == 0);
 
 	return raft_ready;
 }
@@ -533,7 +532,7 @@ int main(int argc, char **argv) {
 	rc.election_ms_min = 150;
 	rc.election_ms_max = 300;
 	rc.log_len = 10;
-	rc.chunk_len = 4;
+	rc.chunk_len = 400;
 	rc.msg_len_max = 500;
 	rc.userdata = state;
 	rc.applier = applier;

@@ -1,0 +1,51 @@
+version: '2'
+
+containers:
+
+  client1:
+    container_name: client1
+    image: raft 
+    environment:
+      ROLE: 'client'
+      CLIENTKEY: 'hello'
+    volumes:
+      "/tmp": "/tmp"
+
+  client2:
+    container_name: client2
+    image: raft 
+    environment:
+      ROLE: 'client'
+      CLIENTKEY: 'world'
+    volumes:
+      "/tmp": "/tmp"
+
+  server1:
+    container_name: server1
+    image: raft 
+    environment:
+      ROLE: 'server'
+      SERVERID: 1
+    volumes:
+      "/tmp": "/tmp"
+
+  server2:
+    container_name: server2
+    image: raft 
+    environment:
+      ROLE: 'server'
+      SERVERID: 2
+    volumes:
+      "/tmp": "/tmp"
+
+  server3:
+    container_name: server3
+    image: raft 
+    environment:
+      ROLE: 'server'
+      SERVERID: 3
+    volumes:
+      "/tmp": "/tmp"
+
+network:
+    driver: udn
