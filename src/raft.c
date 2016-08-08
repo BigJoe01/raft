@@ -311,7 +311,7 @@ bool raft_peer_up(raft_t r, int id, char *host, int port, bool self) {
 	{
 		shout(
 			"cannot convert the host string '%s'"
-			" to a valid address: %s\n", host, strerror(errno));
+			" to a valid address: %s\n", host, gai_strerror(errno));
 		return false;
 	}
     
