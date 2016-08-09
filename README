@@ -10,12 +10,53 @@ Features
 + Log Replication
 + Log Compaction
 
+Usage
+-----
+
+1. Include raft.h and link with -lraft
+
+2. Initialize:
+	a. Populate a ``raft_config_t`` with parameters (host, port, timeouts,
+	log length, etc.)
+
+	b. Set an applier and a snapshooter callbacks. The applier should
+	perform state modification, and the snapshooter should dump the state.
+	See raft.h for their signatures.
+
+	c. Call raft_init(cfg).
+
+	d. Use raft_peer_up(...) to configure the peers, including the current
+	one.
+
+	e. Create and bind the socket with raft_create_udp_socket(...).
+
+3. Serve raft:
+	a. Call raft_tick(...) frequently to perform the logic of timeouts.
+
+	b. Try to extract a message with raft_recv_message(...) when you
+	believe there is one in the socket.
+
+	c. Call raft_handle_message(...) when a message has been successfully
+	extracted from the socket.
+
+4. Serve clients:
+	a. If this server is a leader (call raft_get_leader(...) to find out),
+	then it should accept pending connections and process client quieries.
+
+	b. Use raft_emit(...) to update the state though raft. Then wait until
+	raft_applied(...) before returning the result to the client.
+
+	c. You may use raft_get_leader(...) to redirect clients to the leader,
+	though this is not necessary.
+
+Please read raft.h and example/ for more details.
+
 Testing
 -------
 
 1. Install docker and blockade.
-1. You may want to gain superuser privileges at this point.
-1. ``make check``
+2. You may want to gain superuser privileges at this point.
+3. $ make check
 
 TODO
 ----
