@@ -53,3 +53,5 @@ containers:
 
 network:
     driver: udn
+    flaky: 10%
+    slow: 75ms 100ms distribution normal

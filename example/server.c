@@ -528,9 +528,9 @@ int main(int argc, char **argv) {
 
 	raft_config_t rc;
 	rc.peernum_max = 64;
-	rc.heartbeat_ms = 20;
-	rc.election_ms_min = 150;
-	rc.election_ms_max = 300;
+	rc.heartbeat_ms = 50;
+	rc.election_ms_min = 300;
+	rc.election_ms_max = 600;
 	rc.log_len = 10;
 	rc.chunk_len = 400;
 	rc.msg_len_max = 500;
