@@ -1,13 +1,13 @@
 version: '2'
 
 containers:
-
   client1:
     container_name: client1
     image: raft
     environment:
       ROLE: 'client'
       CLIENTKEY: 'hello'
+      LOG: '/tmp/raft.client1.log'
     volumes:
       "/tmp": "/tmp"
 
@@ -17,6 +17,7 @@ containers:
     environment:
       ROLE: 'client'
       CLIENTKEY: 'world'
+      LOG: '/tmp/raft.client2.log'
     volumes:
       "/tmp": "/tmp"
 
@@ -26,6 +27,7 @@ containers:
     environment:
       ROLE: 'server'
       SERVERID: 10
+      LOG: '/tmp/raft.server1.log'
     volumes:
       "/tmp": "/tmp"
 
@@ -35,6 +37,7 @@ containers:
     environment:
       ROLE: 'server'
       SERVERID: 20
+      LOG: '/tmp/raft.server2.log'
     volumes:
       "/tmp": "/tmp"
 
@@ -44,6 +47,7 @@ containers:
     environment:
       ROLE: 'server'
       SERVERID: 30
+      LOG: '/tmp/raft.server3.log'
     volumes:
       "/tmp": "/tmp"
 

@@ -40,5 +40,6 @@ clean:
 	rm -rfv bin obj lib
 
 check:
+	find /tmp -name 'raft.*.log' -delete || true
 	docker build -t raft .
 	cd tests && ./test.py
