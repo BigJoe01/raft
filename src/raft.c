@@ -27,6 +27,7 @@ typedef enum roles {
 
 #define UDP_SAFE_SIZE 508
 
+// The raft log consists of these structures.
 typedef struct raft_entry_t {
 	int term;
 	bool snapshot;
@@ -43,11 +44,14 @@ typedef struct raft_log_t {
 	raft_entry_t newentry; // partially received entry
 } raft_log_t;
 
+// This structure is used to track how many entries each peer has replicated.
 typedef struct raft_progress_t {
 	int entries; // number of entries fully sent/acked
 	int bytes;   // number of bytes of the currently being sent entry sent/acked
 } raft_progress_t;
 
+// Peer descriptor. Each raft peer has an array of raft_peer_t to track all
+// other peers.
 typedef struct raft_peer_t {
 	bool up;
 
@@ -62,6 +66,7 @@ typedef struct raft_peer_t {
 	int silent_ms; // how long was this peer silent
 } raft_peer_t;
 
+// Current peer's private state.
 typedef struct raft_data_t {
 	int term;   // current term (latest term we have seen)
 	int vote;   // who received our vote in current term
@@ -81,14 +86,30 @@ typedef struct raft_data_t {
 	raft_config_t config;
 } raft_data_t;
 
+// Convenience macros for log.
 #define RAFT_LOG(RAFT, INDEX) ((RAFT)->log.entries[(INDEX) % (RAFT)->config.log_len])
 #define RAFT_LOG_FIRST_INDEX(RAFT) ((RAFT)->log.first)
 #define RAFT_LOG_LAST_INDEX(RAFT) ((RAFT)->log.first + (RAFT)->log.size - 1)
+#define RAFT_LOG_FULL(RAFT) ((RAFT)->log.size == (RAFT)->config.log_len)
 
 #define RAFT_MSG_UPDATE 0 // append entry
 #define RAFT_MSG_DONE   1 // entry appended
 #define RAFT_MSG_CLAIM  2 // vote for me
 #define RAFT_MSG_VOTE   3 // my vote
+
+/*
+ * Raft message "class" hierarchy:
+ *
+ *   raft_msg_data_t <-- raft_msg_update_t
+ *                   <-- raft_msg_done_t
+ *                   <-- raft_msg_claim_t
+ *                   <-- raft_msg_vote_t
+ *
+ * 'update' is sent by a leader to all other peers
+ *   'done' is sent in reply to 'update'
+ *  'claim' is sent by a candidate to all other peers
+ *   'vote' is sent in reply to 'claim'
+ */
 
 typedef struct raft_msg_data_t {
 	int msgtype;
@@ -106,12 +127,12 @@ typedef struct raft_msg_update_t {
 	bool empty;    // the message is just a heartbeat if empty
 
 	int entryterm;
-	int totallen;
+	int totallen;  // the length of the whole update
 
 	int acked;     // the leader's acked number
 
-	int offset;
-	int len;
+	int offset;    // the offset of this chunk inside the whole update
+	int len;       // the length of the chunk
 	char data[1];
 } raft_msg_update_t;
 
@@ -142,6 +163,7 @@ typedef union {
 	raft_msg_vote_t v;
 } raft_msg_any_t;
 
+// Return true if the given config is sane.
 static bool raft_config_is_ok(raft_config_t *config) {
 	bool ok = true;
 
@@ -176,6 +198,8 @@ static bool raft_config_is_ok(raft_config_t *config) {
 
 	return ok;
 }
+
+// === Constructors ===
 
 static void reset_progress(raft_progress_t *p) {
 	p->entries = 0;
@@ -234,6 +258,7 @@ static bool raft_peers_init(raft_t raft) {
 	return true;
 }
 
+// Initialize a raft instance. Returns NULL on failure.
 raft_t raft_init(raft_config_t *config) {
 	raft_t raft = NULL;
 
@@ -273,6 +298,9 @@ cleanup:
 	return NULL;
 }
 
+// ---
+
+// Reset heartbeat or election timer depending on current role of the peer.
 static void raft_reset_timer(raft_t r) {
 	if (r->role == LEADER) {
 		r->timer = r->config.heartbeat_ms;
@@ -284,6 +312,8 @@ static void raft_reset_timer(raft_t r) {
 	}
 }
 
+// Add a peer named 'id'. 'self' should be true, if that peer is this instance.
+// Only one peer should have 'self' == true.
 bool raft_peer_up(raft_t r, int id, char *host, int port, bool self) {
 	raft_peer_t *p = r->peers + id;
 	struct addrinfo hint;
@@ -315,7 +345,7 @@ bool raft_peer_up(raft_t r, int id, char *host, int port, bool self) {
 		return false;
 	}
     
-    assert(a != NULL && a->ai_addrlen <= sizeof(p->addr));
+	assert(a != NULL && a->ai_addrlen <= sizeof(p->addr));
 	memcpy(&p->addr, a->ai_addr, a->ai_addrlen);
 
 	if (self) {
@@ -331,6 +361,21 @@ bool raft_peer_up(raft_t r, int id, char *host, int port, bool self) {
 	return true;
 }
 
+
+// Remove a previously added peer named 'id'.
+void raft_peer_down(raft_t r, int id) {
+	raft_peer_t *p = r->peers + id;
+
+	p->up = false;
+	if (r->me == id) {
+		r->me = NOBODY;
+	}
+
+	r->peernum--;
+}
+
+// Apply all unapplied entries that have been replicated on a majority of peers.
+// Return the number of entries applied by this call.
 static int raft_apply(raft_t raft) {
 	int applied_now = 0;
 	raft_log_t *l = &raft->log;
@@ -343,6 +388,8 @@ static int raft_apply(raft_t raft) {
 	}
 	return applied_now;
 }
+
+// === Convenience functions for socket tuning ===
 
 static void socket_set_recv_timeout(int sock, int ms) {
 	struct timeval tv;
@@ -362,6 +409,8 @@ static void socket_set_reuseaddr(int sock) {
 		shout("failed to set socket to reuseaddr: %s\n", strerror(errno));
 	}
 }
+
+// ---
 
 int raft_create_udp_socket(raft_t r) {
 	assert(r->me != NOBODY);
@@ -409,11 +458,13 @@ int raft_create_udp_socket(raft_t r) {
 	}
 
 	shout("cannot resolve the host string '%s' to a valid address\n",
-		  me->host
-		);
+		me->host
+	);
 	return -1;
 }
 
+// Check that the given raft message 'm' should be 'mlen' bytes long according
+// to its type.
 static bool msg_size_is(raft_msg_t m, int mlen) {
 	switch (m->msgtype) {
 		case RAFT_MSG_UPDATE:
@@ -428,6 +479,7 @@ static bool msg_size_is(raft_msg_t m, int mlen) {
 	return false;
 }
 
+// Send message 'm' of length 'mlen' to peer 'dst'.
 static void raft_send(raft_t r, int dst, void *m, int mlen) {
 	assert(r->peers[dst].up);
 	assert(mlen <= r->config.msg_len_max);
@@ -453,6 +505,9 @@ static void raft_send(raft_t r, int dst, void *m, int mlen) {
 	}
 }
 
+// A heartbeat by the leader. Sends pending entries to each follower, or
+// heartbeats to those followers which are up to date.
+// 'dst' specifies the destination peer, or NOBODY if a broadcast is needed.
 static void raft_beat(raft_t r, int dst) {
 	if (dst == NOBODY) {
 		// send a beat/update to everybody
@@ -533,6 +588,8 @@ static void raft_beat(raft_t r, int dst) {
 	free(m);
 }
 
+// Reset the byte-progress of the followers. This will make the leader send
+// the next entry from the beginning.
 static void raft_reset_bytes_acked(raft_t r) {
 	int i;
 	for (i = 0; i < r->config.peernum_max; i++) {
@@ -540,6 +597,9 @@ static void raft_reset_bytes_acked(raft_t r) {
 	}
 }
 
+// The timer of 'silence' is used to track the situation of leader being
+// isolated. When there is no answer from a majority for a long enough time,
+// the leader will step down.
 static void raft_reset_silent_time(raft_t r, int id) {
 	int i;
 	for (i = 0; i < r->config.peernum_max; i++) {
@@ -548,8 +608,23 @@ static void raft_reset_silent_time(raft_t r, int id) {
 		}
 	}
 }
+static int raft_increase_silent_time(raft_t r, int ms) {
+	int recent_peers = 1; // count myself as recent
+	int i;
+	for (i = 0; i < r->config.peernum_max; i++) {
+		if (!r->peers[i].up) continue;
+		if (i == r->me) continue;
 
-// Returns true if we got the support of a majority and became the leader
+		r->peers[i].silent_ms += ms;
+		if (r->peers[i].silent_ms < r->config.election_ms_max) {
+			recent_peers++;
+		}
+	}
+
+	return recent_peers;
+}
+
+// Return true if we got the support of a majority and became the leader.
 static bool raft_become_leader(raft_t r) {
 	if (r->votes * 2 > r->peernum) {
 		// got the support of a majority
@@ -564,6 +639,7 @@ static bool raft_become_leader(raft_t r) {
 	return false;
 }
 
+// Send our claim for leadership to all other peers.
 static void raft_claim(raft_t r) {
 	assert(r->role == CANDIDATE);
 	assert(r->leader == NOBODY);
@@ -580,7 +656,7 @@ static void raft_claim(raft_t r) {
 	m.msg.curterm = r->term;
 	m.msg.from = r->me;
 
-	m.index = r->log.first + r->log.size - 1;
+	m.index = RAFT_LOG_LAST_INDEX(r);
 	if (m.index >= 0) {
 		m.lastterm = RAFT_LOG(r, m.index).term;
 	} else {
@@ -599,8 +675,9 @@ static void raft_claim(raft_t r) {
 	}
 }
 
+// Pick each peer's 'acked' and check if it is also acked on the majority.
+// The max of these will give us the global progress.
 static void raft_refresh_acked(raft_t r) {
-	// pick each peer's acked and see if it is acked on the majority
 	// TODO: count 'acked' inside the entry itself to remove the nested loop here
 	int i, j;
 	for (i = 0; i < r->config.peernum_max; i++) {
@@ -629,26 +706,11 @@ static void raft_refresh_acked(raft_t r) {
 		}
 	}
 
+	// Try to apply all entries which have been replicated on a majority.
 	int applied = raft_apply(r);
 	if (applied) {
 		debug("applied %d updates\n", applied);
 	}
-}
-
-static int raft_increase_silent_time(raft_t r, int ms) {
-	int recent_peers = 1; // count myself as recent
-	int i;
-	for (i = 0; i < r->config.peernum_max; i++) {
-		if (!r->peers[i].up) continue;
-		if (i == r->me) continue;
-
-		r->peers[i].silent_ms += ms;
-		if (r->peers[i].silent_ms < r->config.election_ms_max) {
-			recent_peers++;
-		}
-	}
-
-	return recent_peers;
 }
 
 void raft_tick(raft_t r, int msec) {
@@ -724,11 +786,14 @@ static int raft_compact(raft_t raft) {
 	return compacted;
 }
 
+// Emit an 'update'. Returns the log index if emitted successfully, or -1
+// otherwise.
 int raft_emit(raft_t r, raft_update_t update) {
 	assert(r->leader == r->me);
 	assert(r->role == LEADER);
 
-	if (r->log.size == r->config.log_len) {
+	// Compact the log if it is full.
+	if (RAFT_LOG_FULL(r)) {
 		int compacted = raft_compact(r);
 		if (compacted > 1) {
 			debug("compacted %d entries\n", compacted);
@@ -741,6 +806,7 @@ int raft_emit(raft_t r, raft_update_t update) {
 		}
 	}
 
+	// Append the entry to the log.
 	int newindex = RAFT_LOG_LAST_INDEX(r) + 1;
 	raft_entry_t *e = &RAFT_LOG(r, newindex);
 	e->term = r->term;
@@ -752,11 +818,13 @@ int raft_emit(raft_t r, raft_update_t update) {
 	memcpy(e->update.data, update.data, update.len);
 	r->log.size++;
 
+	// Replicate.
 	raft_beat(r, NOBODY);
 	raft_reset_timer(r);
 	return newindex;
 }
 
+// Checks whether an entry at 'index' has been applied by the peer named 'id'.
 bool raft_applied(raft_t r, int id, int index) {
 	if (r->me == id) {
 		return r->log.applied > index;
@@ -767,27 +835,34 @@ bool raft_applied(raft_t r, int id, int index) {
 	}
 }
 
+// Restore the state from a snapshot.
 static bool raft_restore(raft_t r, int previndex, raft_entry_t *e) {
 	int i;
 	assert(e->bytes == e->update.len);
 	assert(e->snapshot);
+
+	// Clear the log
 	for (i = RAFT_LOG_FIRST_INDEX(r); i <= RAFT_LOG_LAST_INDEX(r); i++) {
 		raft_entry_t *victim = &RAFT_LOG(r, i);
 		free(victim->update.data);
 		victim->update.len = 0;
 		victim->update.data = NULL;
 	}
+
+	// The new log will have only one entry - the snapshot.
 	int index = previndex + 1;
 	r->log.first = index;
 	r->log.size = 1;
 	RAFT_LOG(r, index) = *e;
 	raft_entry_init(e);
 
-	r->config.applier(r->config.userdata, RAFT_LOG(r, index).update, true);
+	r->config.applier(r->config.userdata, RAFT_LOG(r, index).update, true /*snapshot*/);
 	r->log.applied = index + 1;
 	return true;
 }
 
+// Check whether it is possible to insert an entry next to the 'previndex'
+// having 'prevterm'.
 static bool raft_appendable(raft_t r, int previndex, int prevterm) {
 	int low, high;
 
@@ -815,6 +890,8 @@ static bool raft_appendable(raft_t r, int previndex, int prevterm) {
 	return true;
 }
 
+// Append entry 'e' after 'previndex' having 'prevterm'. Return false if not
+// possible.
 static bool raft_append(raft_t r, int previndex, int prevterm, raft_entry_t *e) {
 	assert(e->bytes == e->update.len);
 	assert(!e->snapshot);
@@ -848,7 +925,7 @@ static bool raft_append(raft_t r, int previndex, int prevterm, raft_entry_t *e) 
 	int index = previndex + 1;
 	raft_entry_t *slot = &RAFT_LOG(r, index);
 
-	if (index < l->first + l->size) {
+	if (index <= RAFT_LOG_LAST_INDEX(r)) {
 		// replacing an existing entry
 		if (slot->term != e->term) {
 			// entry conflict, remove the entry and all that follow
@@ -858,7 +935,8 @@ static bool raft_append(raft_t r, int previndex, int prevterm, raft_entry_t *e) 
 		free(slot->update.data);
 	}
 
-	if (index == l->first + l->size) {
+	if (index > RAFT_LOG_LAST_INDEX(r)) {
+		// increase log size if actually appended
 		l->size++;
 	}
 	*slot = *e;
@@ -867,6 +945,11 @@ static bool raft_append(raft_t r, int previndex, int prevterm, raft_entry_t *e) 
 	return true;
 }
 
+// === Incoming message handlers ===
+
+// This is called when an update (or chunk of it) is recved from the leader.
+// An update does not get applied and replicated until all of its chunks have
+// been recved. We reply with a 'done' message.
 static void raft_handle_update(raft_t r, raft_msg_update_t *m) {
 	int sender = m->msg.from;
 
@@ -879,6 +962,7 @@ static void raft_handle_update(raft_t r, raft_msg_update_t *m) {
 	raft_entry_t *e = &r->log.newentry;
 	raft_update_t *u = &e->update;
 
+	// The entry should either be an empty heartbeat, or be appendable, or be a snapshot.
 	if (!m->empty && !m->snapshot && !raft_appendable(r, m->previndex, m->prevterm)) goto finish;
 
 	if (RAFT_LOG_LAST_INDEX(r) >= 0) {
@@ -902,6 +986,7 @@ static void raft_handle_update(raft_t r, raft_msg_update_t *m) {
 	r->peers[sender].silent_ms = 0;
 	raft_reset_timer(r);
 
+	// Update the global progress sent by the leader.
 	if (m->acked > r->log.acked) {
 		r->log.acked = min(
 			r->log.first + r->log.size,
@@ -941,6 +1026,7 @@ static void raft_handle_update(raft_t r, raft_msg_update_t *m) {
 		e->snapshot = m->snapshot;
 
 		if (e->bytes == u->len) {
+			// The entry has been fully received.
 			if (m->snapshot) {
 				if (!raft_restore(r, m->previndex, e)) {
 					shout("restore from snapshot failed\n");
@@ -980,7 +1066,11 @@ finish:
 	raft_send(r, sender, &reply, sizeof(reply));
 }
 
+// This is called when an 'ack' for an update (or chunk of it) is recved from a
+// follower. We reply with the next update (or chunk of it), if it is needed.
 static void raft_handle_done(raft_t r, raft_msg_done_t *m) {
+	// Ignore the message if it is old or unexpected.
+
 	if (r->role != LEADER) {
 		return;
 	}
@@ -1000,6 +1090,8 @@ static void raft_handle_done(raft_t r, raft_msg_done_t *m) {
 		debug("[from %d] ============= msgterm(%d) != term(%d)\n", sender, m->msg.curterm, r->term);
 		return;
 	}
+
+	// The message is expected and actual.
 
 	peer->applied = m->applied;
 
@@ -1021,6 +1113,7 @@ static void raft_handle_done(raft_t r, raft_msg_done_t *m) {
 	}
 }
 
+// Switch to a more recent term.
 static void raft_set_term(raft_t r, int term) {
 	assert(term > r->term);
 	r->term = term;
@@ -1028,13 +1121,8 @@ static void raft_set_term(raft_t r, int term) {
 	r->votes = 0;
 }
 
-void raft_ensure_term(raft_t r, int term) {
-	assert(r->role == LEADER);
-	if (term > r->term) {
-		r->term = term;
-	}
-}
-
+// This is called when a leadership claim is recved from a candidate.
+// We reply with a 'vote' message.
 static void raft_handle_claim(raft_t r, raft_msg_claim_t *m) {
 	int candidate = m->msg.from;
 
@@ -1059,13 +1147,15 @@ static void raft_handle_claim(raft_t r, raft_msg_claim_t *m) {
 	if (m->msg.curterm < r->term) goto finish;
 
 	// check if the candidate's log is up to date
-	if (m->index < r->log.first + r->log.size - 1) goto finish;
-	if (m->index == r->log.first + r->log.size - 1) {
+	if (m->index < RAFT_LOG_LAST_INDEX(r)) goto finish;
+	if (m->index == RAFT_LOG_LAST_INDEX(r)) {
 		if ((m->index >= 0) && (RAFT_LOG(r, m->index).term != m->lastterm)) {
 			goto finish;
 		}
 	}
 
+	// Grant the vote if we haven't voted in the current term, or if we
+	// have voted for the same candidate.
 	if ((r->vote == NOBODY) || (r->vote == candidate)) {
 		r->vote = candidate;
 		raft_reset_timer(r);
@@ -1076,6 +1166,8 @@ finish:
 	raft_send(r, candidate, &reply, sizeof(reply));
 }
 
+// A vote has been recved. Count the valid votes and become the leader if a
+// majority of peers have voted 'yes'.
 static void raft_handle_vote(raft_t r, raft_msg_vote_t *m) {
 	int sender = m->msg.from;
 	raft_peer_t *peer = r->peers + sender;
@@ -1092,6 +1184,8 @@ static void raft_handle_vote(raft_t r, raft_msg_vote_t *m) {
 	raft_become_leader(r);
 }
 
+// A message has been recved. Determine its type, do some checks, and process
+// it further in a specific handler for the type.
 void raft_handle_message(raft_t r, raft_msg_t m) {
 	if (m->curterm > r->term) {
 		if (r->role != FOLLOWER) {
@@ -1123,6 +1217,8 @@ void raft_handle_message(raft_t r, raft_msg_t m) {
 
 static char buf[UDP_SAFE_SIZE];
 
+// Try to recv a message from the socket. Return NULL if no valid messages
+// available.
 raft_msg_t raft_recv_message(raft_t r) {
 	struct sockaddr_in addr;
 	unsigned int addrlen = sizeof(addr);
@@ -1193,14 +1289,17 @@ raft_msg_t raft_recv_message(raft_t r) {
 	return m;
 }
 
+// Returns true if this peer thinks it is the leader.
 bool raft_is_leader(raft_t r) {
 	return r->role == LEADER;
 }
 
+// Returns the id of the current leader, or NOBODY if no leader.
 int raft_get_leader(raft_t r) {
 	return r->leader;
 }
 
+// Returns the number of entried applied by the current peer.
 int raft_progress(raft_t r) {
 	return r->log.applied;
 }

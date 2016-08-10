@@ -33,12 +33,14 @@ def log_to_everybody(line):
 
 def blockade_partition(name):
     log_to_everybody("=== partition %s away" % name)
+    subprocess.check_call(['blockade', 'status'])
     subprocess.check_call(['blockade', 'partition', name])
     subprocess.check_call(['blockade', 'status'])
     log_to_everybody("=== %s partitioned away" % name)
 
 def blockade_join():
     log_to_everybody("=== join the network")
+    subprocess.check_call(['blockade', 'status'])
     subprocess.check_call(['blockade', 'join'])
     subprocess.check_call(['blockade', 'status'])
     log_to_everybody("=== the network joined")
@@ -53,7 +55,6 @@ def blockade_up():
 def blockade_stop():
     log_to_everybody("=== stop blockade")
     subprocess.check_call(['blockade', 'stop', '--all'])
-    subprocess.check_call(['blockade', 'status'])
     log_to_everybody("=== blockade stopped")
 
 def blockade_destroy():
@@ -63,18 +64,21 @@ def blockade_destroy():
 
 def blockade_flaky(*names):
     log_to_everybody("=== make network flaky for %s" % ', '.join(names))
+    subprocess.check_call(['blockade', 'status'])
     subprocess.check_call(['blockade', 'flaky'] + list(names))
     subprocess.check_call(['blockade', 'status'])
     log_to_everybody("=== network made flaky for %s" % ', '.join(names))
 
 def blockade_slow(*names):
     log_to_everybody("=== make network slow for %s" % ', '.join(names))
+    subprocess.check_call(['blockade', 'status'])
     subprocess.check_call(['blockade', 'slow'] + list(names))
     subprocess.check_call(['blockade', 'status'])
     log_to_everybody("=== network made slow for %s" % ', '.join(names))
 
 def blockade_fast():
     log_to_everybody("=== make network fast")
+    subprocess.check_call(['blockade', 'status'])
     subprocess.check_call(['blockade', 'fast', '--all'])
     subprocess.check_call(['blockade', 'status'])
     log_to_everybody("=== network made fast")
